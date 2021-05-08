@@ -5,10 +5,10 @@ from pathlib import Path
 import cv2
 import torch
 import torch.backends.cudnn as cudnn
-from numpy import random
+from numpy import random, ndarray
 
 from models.experimental import attempt_load
-from utils.datasets import LoadStreams, LoadImages
+from utils.datasets import LoadStreams, LoadImages, LoadArray
 from utils.general import check_img_size, check_requirements, check_imshow, non_max_suppression, apply_classifier, \
     scale_coords, xyxy2xywh, strip_optimizer, set_logging, increment_path, save_one_box
 from utils.plots import colors, plot_one_box
@@ -18,11 +18,24 @@ from utils.torch_utils import select_device, load_classifier, time_synchronized
 def detect(opt):
     source, weights, view_img, save_txt, imgsz = opt.source, opt.weights, opt.view_img, opt.save_txt, opt.img_size
     save_img = not opt.nosave and not source.endswith('.txt')  # save inference images
-    webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
-        ('rtsp://', 'rtmp://', 'http://', 'https://'))
+    
+    webcam = False
+    supported_inputs = False
+    array = False
+    
+    try:
+        webcam = source.isnumeric() or source.endswith('.txt') or source.lower().startswith(
+            ('rtsp://', 'rtmp://', 'http://', 'https://'))
+        supported_inputs = not webcam
+    except:
+        pass
+
+    if isinstance(source, ndarray):
+        array = True
 
     # Directories
-    save_dir = increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok)  # increment run
+    # save_dir = increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok)  # increment run
+    save_dir = Path(opt.project) / opt.name
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
     # Initialize
@@ -50,8 +63,11 @@ def detect(opt):
         view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
         dataset = LoadStreams(source, img_size=imgsz, stride=stride)
-    else:
+    if supported_inputs and not array:
         dataset = LoadImages(source, img_size=imgsz, stride=stride)
+    if array:
+        dataset = LoadArray(source, img_size=imgsz, stride=stride)
+
 
     # Run inference
     if device.type != 'cpu':
@@ -98,20 +114,21 @@ def detect(opt):
                     s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
+                labels = []
                 for *xyxy, conf, cls in reversed(det):
-                    if save_txt:  # Write to file
-                        xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
-                        line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
+                    xywh = (xyxy2xywh(torch.tensor(xyxy).view(1, 4)) / gn).view(-1).tolist()  # normalized xywh
+                    line = (cls, *xywh, conf) if opt.save_conf else (cls, *xywh)  # label format
+                    labels.append(line)
+                    if save_txt:  # Write to file                        
                         with open(txt_path + '.txt', 'a') as f:
                             f.write(('%g ' * len(line)).rstrip() % line + '\n')
 
-                    if save_img or opt.save_crop or view_img:  # Add bbox to image
-                        c = int(cls)  # integer class
-                        label = None if opt.hide_labels else (names[c] if opt.hide_conf else f'{names[c]} {conf:.2f}')
+                    c = int(cls)  # integer class
+                    label = None if opt.hide_labels else (names[c] if opt.hide_conf else f'{names[c]} {conf:.2f}')
 
-                        plot_one_box(xyxy, im0, label=label, color=colors(c, True), line_thickness=opt.line_thickness)
-                        if opt.save_crop:
-                            save_one_box(xyxy, im0s, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                    plot_one_box(xyxy, im0, label=label, color=colors(c, True), line_thickness=opt.line_thickness)
+                    if opt.save_crop:
+                        save_one_box(xyxy, im0s, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
 
             # Print time (inference + NMS)
             print(f'{s}Done. ({t2 - t1:.3f}s)')
@@ -119,7 +136,7 @@ def detect(opt):
             # Stream results
             if view_img:
                 cv2.imshow(str(p), im0)
-                cv2.waitKey(1)  # 1 millisecond
+                cv2.waitKey(0)  # 1 millisecond
 
             # Save results (image with detections)
             if save_img:
@@ -145,6 +162,36 @@ def detect(opt):
         print(f"Results saved to {save_dir}{s}")
 
     print(f'Done. ({time.time() - t0:.3f}s)')
+
+    return im0, labels, names
+
+class Arguments:
+    def __init__(self, weights='.\weights\yolov5s.pt', source='.\sample\sample.jpg', img_size=640, 
+                 conf_thres=0.25, iou_thres=0.45, device='', view_img=False, save_txt=False, save_conf=False, 
+                 save_crop=False, nosave=False, classes=None, agnostic_nms=False, augment=False, update=False, 
+                 project='runs/detect', name='exp', exist_ok=False, line_thickness=3, hide_labels=False, hide_conf=False):
+        
+        self.weights = weights
+        self.source = source
+        self.img_size = img_size
+        self.conf_thres = conf_thres
+        self.iou_thres = iou_thres
+        self.device = device
+        self.view_img = view_img
+        self.save_txt = save_txt
+        self.save_conf = save_conf
+        self.save_crop = save_crop
+        self.nosave = nosave
+        self.classes = classes
+        self.agnostic_nms = agnostic_nms
+        self.augment = augment
+        self.update = update
+        self.project = project
+        self.name = name
+        self.exist_ok = exist_ok
+        self.line_thickness = line_thickness
+        self.hide_labels = hide_labels
+        self.hide_conf = hide_conf
 
 
 if __name__ == '__main__':

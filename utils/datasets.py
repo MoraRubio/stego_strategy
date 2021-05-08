@@ -198,6 +198,35 @@ class LoadImages:  # for inference
     def __len__(self):
         return self.nf  # number of files
 
+class LoadArray:  # for inference
+    def __init__(self, array, img_size=640, stride=32):
+        self.array = array
+        self.img_size = img_size
+        self.stride = stride
+        self.cap = None
+        self.mode = 'image'
+
+    def __iter__(self):
+        self.count = 0
+        return self
+
+    def __next__(self):  
+        if self.count == 1:
+            raise StopIteration
+        
+        self.count += 1  
+        img0 = cv2.cvtColor(self.array, cv2.COLOR_RGB2BGR)  # BGR
+        assert img0 is not None, 'Image Not Found'
+
+        # Padded resize
+        img = letterbox(img0, self.img_size, stride=self.stride)[0]
+
+        # Convert
+        img = img[:, :, ::-1].transpose(2, 0, 1)  # BGR to RGB, to 3x416x416
+        img = np.ascontiguousarray(img)
+
+        return '', img, img0, self.cap
+
 
 class LoadWebcam:  # for inference
     def __init__(self, pipe='0', img_size=640, stride=32):
